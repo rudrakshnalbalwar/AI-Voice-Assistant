@@ -105,6 +105,8 @@ You will decide whether a query is a 'general' query, a 'realtime' query, or is 
 
 """
 
+# Define a chat history with predefined user-chatbot interaction for context
+
 ChatHistory = [
     {"role": "User", "message": "how are you"},
     {"role": "Chatbot", "message": "general how are you"},
@@ -115,5 +117,25 @@ ChatHistory = [
     {"role": "User", "message": "open chrome and firefox"},
     {"role": "Chatbot", "message": "open chrome, open firefox"},
     {"role": "User", "message": "what is today's date and by the way remind me that I havea dancing performance on 5th aug at 11pm"},
-    {"role": "Chatbot", "message": ""}
+    {"role": "Chatbot", "message": "general what is today's date, reminder 11:00pm 5th aug dancing performance"},
+    {"role": "User", "message": "chat with me"},
+    {"role": "Chatbot", "message": "general chat with me"},
 ]
+
+# define the main function for decision making on queries
+
+def FirstLayerDMM(prompt: str = "test"):
+    # Add the user's query to the messages list.
+    messages.append({"role": "User", "content": f'{prompt}'})
+    
+    # Create a streaming chat session with the cohere model.
+    stream = co.chat_stream(
+        model='command-r-plus',  # specify the cohere model to use
+        message=prompt,   # pass the user's query
+        temperature=0.7,  # set the creativity level of the model
+        chat_history=ChatHistory,  # Provide the predefined chat history for context
+        prompt_truncation='OFF',   # ensure the prompt is not truncated
+        connectors=[],   # No additional connectors are usedd
+        preamble=preamble   # pass the detailed instruction preamble
+    )
+    
