@@ -106,7 +106,6 @@ You will decide whether a query is a 'general' query, a 'realtime' query, or is 
 """
 
 # Define a chat history with predefined user-chatbot interaction for context
-
 ChatHistory = [
     {"role": "User", "message": "how are you"},
     {"role": "Chatbot", "message": "general how are you"},
