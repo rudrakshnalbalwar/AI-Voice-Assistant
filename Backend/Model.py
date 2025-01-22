@@ -1,12 +1,16 @@
 import cohere # Import the cohere library for AI services
-from rich import print  # Rich library to enhance terminal outputs
 from dotenv import dotenv_values # dotenv to load environment varibales from a .env file
+from rich import print as rich_print_function  # Rich library to enhance terminal outputs
 
 # load environment variables from the .env file
-env_vars = dotenv_values(".env")
+env_vars = dotenv_values(r'C:\Users\Dell\Downloads\AI\jarvis\.env')
 
 # Retrieve API Key
 CohereAPIKey = env_vars.get("CohereAPIKey")
+
+# Checking if the API key is retrieved correctly
+if not CohereAPIKey:
+    raise ValueError("Cohere API key not found")
 
 # Create a cohere client using the provided API key
 co = cohere.Client(api_key=CohereAPIKey)
@@ -18,7 +22,7 @@ funcs = [
     "youtube search", "reminder"
 ]
 
-#Initialize an empty list to store user messages
+# Initialize an empty list to store user messages
 messages = []
 
 # Define the preamble that guides the AI model on how to categorize queries
@@ -97,6 +101,8 @@ You will decide whether a query is a 'general' query, a 'realtime' query, or is 
     - Example: If the query is "Search for TED Talks about leadership.", respond with 'youtube search ted talks about leadership'
     - Example: If the query is "Look up funny cat videos.", respond with 'youtube search funny cat videos'
 
+→ Respond with 'general (query)' for conversational or general queries, like asking for your name, personality, or something that doesn't fall into specific tasks.
+
 ** If the query is asking to perform multiple tasks like 'open Facebook, Telegram, and close WhatsApp,' respond with 'open facebook, open telegram, close whatsapp.' **
 
 ** If the user is saying goodbye or wants to end the conversation like 'bye Jarvis,' respond with 'exit.' **
@@ -123,18 +129,42 @@ ChatHistory = [
 
 # define the main function for decision making on queries
 
-def FirstLayerDMM(prompt: str = "test"):
-    # Add the user's query to the messages list.
-    messages.append({"role": "User", "content": f'{prompt}'})
+def FirstLayerDMM(prompt: str):
+    try:
+        # Add the user input to chat history
+        ChatHistory.append({"role": "User", "message": prompt})
+
+        # Get the response from Cohere's chat method
+        response = None
+        try:
+            if "name" in prompt.lower() and "jarvis" in prompt.lower():
+                response_text = "Sure, from now on you can call me Jarvis. How can I assist you today?"
+            else:
+                # Get the response from Cohere's chat method
+                response = co.generate(
+                    model='command-xlarge',  # Use the appropriate model name
+                    prompt=f"{preamble}\nUser: {prompt}\nChatbot:",
+                    max_tokens=100,
+                    temperature=0.7,
+                    stop_sequences=["User:", "Chatbot:"]
+                )
+
+                # Extract and display the bot's message
+                response_text = response.generations[0].text.strip()
+        except Exception as e:
+            response_text = f"Error: {e}"
+        ChatHistory.append({"role": "Chatbot", "message": response_text})
+        # Display the response
+        rich_print_function(f"[bold green]Chatbot:[/bold green] {response_text}")
+    except Exception as e:
+        rich_print_function(f"[bold red]Error:[/bold red] {e}")
     
-    # Create a streaming chat session with the cohere model.
-    stream = co.chat_stream(
-        model='command-r-plus',  # specify the cohere model to use
-        message=prompt,   # pass the user's query
-        temperature=0.7,  # set the creativity level of the model
-        chat_history=ChatHistory,  # Provide the predefined chat history for context
-        prompt_truncation='OFF',   # ensure the prompt is not truncated
-        connectors=[],   # No additional connectors are usedd
-        preamble=preamble   # pass the detailed instruction preamble
-    )
-    
+
+
+if __name__ == "__main__":
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() in ["exit", "quit", "bye"]:
+            print("Chatbot: Goodbye!")
+            break
+        FirstLayerDMM(user_input)
