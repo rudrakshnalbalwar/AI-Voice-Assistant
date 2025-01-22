@@ -90,4 +90,4 @@ def ChatBot(Query):
                 
         Answer = Answer.replace("</s>", "")   # clean up any unwanted tokens from the response.
         
-        
+        # Append 
