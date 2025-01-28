@@ -114,17 +114,17 @@ You will decide whether a query is a 'general' query, a 'realtime' query, or is 
 # Define a chat history with predefined user-chatbot interaction for context
 ChatHistory = [
     {"role": "User", "message": "how are you"},
-    {"role": "Chatbot", "message": "general how are you"},
+    {"role": "Jarvis", "message": "general how are you"},
     {"role": "User", "message": "do you like pizza"},
-    {"role": "Chatbot", "message": "general do you like pizza"},
+    {"role": "Jarvis", "message": "general do you like pizza"},
     {"role": "User", "message": "open chrome and tell me about mahatma gandhi."},
-    {"role": "Chatbot", "message": "open chrome, general tell me about mahatma gandhi."},
+    {"role": "jarvis", "message": "open chrome, general tell me about mahatma gandhi."},
     {"role": "User", "message": "open chrome and firefox"},
-    {"role": "Chatbot", "message": "open chrome, open firefox"},
+    {"role": "Jarvis", "message": "open chrome, open firefox"},
     {"role": "User", "message": "what is today's date and by the way remind me that I havea dancing performance on 5th aug at 11pm"},
-    {"role": "Chatbot", "message": "general what is today's date, reminder 11:00pm 5th aug dancing performance"},
+    {"role": "Jarvis", "message": "general what is today's date, reminder 11:00pm 5th aug dancing performance"},
     {"role": "User", "message": "chat with me"},
-    {"role": "Chatbot", "message": "general chat with me"},
+    {"role": "Jarvis", "message": "general chat with me"},
 ]
 
 # define the main function for decision making on queries
@@ -143,19 +143,19 @@ def FirstLayerDMM(prompt: str):
                 # Get the response from Cohere's chat method
                 response = co.generate(
                     model='command-xlarge',  # Use the appropriate model name
-                    prompt=f"{preamble}\nUser: {prompt}\nChatbot:",
+                    prompt=f"{preamble}\nUser: {prompt}\nJarvis:",
                     max_tokens=100,
                     temperature=0.7,
-                    stop_sequences=["User:", "Chatbot:"]
+                    stop_sequences=["User:", "Jarvis:"]
                 )
 
                 # Extract and display the bot's message
                 response_text = response.generations[0].text.strip()
         except Exception as e:
             response_text = f"Error: {e}"
-        ChatHistory.append({"role": "Chatbot", "message": response_text})
+        ChatHistory.append({"role": "Jarvis", "message": response_text})
         # Display the response
-        rich_print_function(f"[bold green]Chatbot:[/bold green] {response_text}")
+        rich_print_function(f"[bold green]Jarvis:[/bold green] {response_text}")
     except Exception as e:
         rich_print_function(f"[bold red]Error:[/bold red] {e}")
     
