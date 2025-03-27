@@ -168,7 +168,7 @@ async def Content(Topic):
         # Save to file
         try:
             safe_filename = re.sub(r'[\\/*?:"<>|]', "", Topic.lower().replace(' ', '_')[:30])
-            data_dir = os.path.join(os.getcwd(), "Data")
+            data_dir = r"C:\Users\Dell\Downloads\AI\jarvis\Data"
             os.makedirs(data_dir, exist_ok=True)
             file_path = os.path.join(data_dir, f"{safe_filename}.txt")
 
@@ -511,15 +511,70 @@ async def TranslateAndExecute(commands: list[str]):
             success = "succeeded" if result else "failed"
             print(f"Command '{desc}' {success}")
 
-# Asynchronous function to automate command execution
-async def Automation(commands: list[str]):
-    print(f"Automating {len(commands)} commands...")
+# Add this function to handle closing all apps
+async def CloseAllApps():
+    """Closes all non-essential applications"""
     try:
-        await TranslateAndExecute(commands)
-        return True
+        import psutil
+        
+        # List of essential processes we don't want to close
+        essential = ['explorer.exe', 'svchost.exe', 'csrss.exe', 'winlogon.exe', 
+                    'services.exe', 'lsass.exe', 'python.exe', 'pythonw.exe',
+                    'chrome.exe', 'vscode.exe']  # Keep Chrome since we need it for speech recognition
+        
+        closed_apps = []
+        
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                # If it's a visible application with a window and not essential
+                proc_name = proc.name().lower() 
+                if proc_name.endswith('.exe') and proc_name not in essential:
+                    try:
+                        proc.terminate()
+                        closed_apps.append(proc_name)
+                        print(f"Closed {proc_name}")
+                    except:
+                        pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        
+        if closed_apps:
+            return f"Successfully closed the following applications: {', '.join(closed_apps)}"
+        else:
+            return "No applications needed to be closed."
+    except Exception as e:
+        print(f"Error closing all apps: {e}")
+        return f"Error closing applications: {str(e)}"
+
+# Then update the Automation function:
+async def Automation(commands: list):
+    """Process multiple automation commands"""
+    try:
+        results = []
+        
+        for command in commands:
+            command = command.lower().strip()
+            print(f"Processing command: {command}")
+            
+            # Special case for closing all apps
+            if "close all" in command and ("app" in command or "application" in command):
+                result = await CloseAllApps()
+                results.append(result)
+                continue
+                
+            # Handle standard open/close/play commands
+            if command.startswith("open "):
+                # Rest of your existing code for open
+                pass
+            elif command.startswith("close "):
+                # Rest of your existing code for close
+                pass
+            # Rest of your existing function
+        
+        return "\n".join(results)
     except Exception as e:
         print(f"Error in Automation: {e}")
-        return False
+        return f"Error processing automation commands: {str(e)}"
 
 # Test function to demonstrate usage
 async def test_automation():

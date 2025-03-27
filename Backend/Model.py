@@ -130,36 +130,138 @@ ChatHistory = [
 # define the main function for decision making on queries
 
 def FirstLayerDMM(prompt: str):
+    """Enhanced decision making model to better handle compound queries"""
     try:
         # Add the user input to chat history
         ChatHistory.append({"role": "User", "message": prompt})
-
-        # Get the response from Cohere's chat method
-        response = None
+        
+        # First check for exit commands
+        if prompt.lower() in ["exit", "bye", "goodbye", "quit", "stop"]:
+            return ["exit"]
+        
+        # Split compound requests BEFORE sending to API
+        tasks = []
+        
+        # Check for multiple task indicators
+        if " and " in prompt.lower():
+            # This is likely a multi-task request
+            parts = prompt.lower().split(" and ")
+            
+            # Check for code generation requests
+            if any(code_term in prompt.lower() for code_term in ["code", "program", "script", "algorithm"]):
+                code_part = next((part for part in parts if any(term in part for term in ["code", "program", "script", "algorithm"])), None)
+                if code_part:
+                    # Add content generation task for the code
+                    tasks.append(f"content {code_part}")
+            
+            # Check for letter/document generation
+            if any(doc_term in prompt.lower() for doc_term in ["letter", "email", "draft", "write"]):
+                doc_part = next((part for part in parts if any(term in part for term in ["letter", "email", "draft", "write"])), None)
+                if doc_part:
+                    # Add content generation task for the document
+                    tasks.append(f"content {doc_part}")
+            
+            # Check for search requests
+            if any(search_term in prompt.lower() for search_term in ["search", "look up", "find"]):
+                search_part = next((part for part in parts if any(term in part for term in ["search", "look up", "find"])), None)
+                if search_part:
+                    # Add Google search task
+                    if "google" in search_part.lower():
+                        search_query = search_part.replace("search", "").replace("on google", "").replace("google", "").strip()
+                        tasks.append(f"google search {search_query}")
+                    else:
+                        # Add realtime search
+                        tasks.append(f"realtime {search_part}")
+            
+            # Check for application commands
+            for part in parts:
+                if any(app_cmd in part for app_cmd in ["open", "close", "play"]):
+                    tasks.append(part.strip())
+        
+        # If we already processed tasks through our own parsing, return them
+        if tasks:
+            print(f"Pre-processed multi-task request into: {tasks}")
+            return tasks
+            
+        # If we couldn't pre-process, send to the API model
         try:
-            if "name" in prompt.lower() and "jarvis" in prompt.lower():
-                response_text = "Sure, from now on you can call me Jarvis. How can I assist you today?"
-            else:
-                # Get the response from Cohere's chat method
-                response = co.generate(
-                    model='command-xlarge',  # Use the appropriate model name
-                    prompt=f"{preamble}\nUser: {prompt}\nJarvis:",
-                    max_tokens=100,
-                    temperature=0.7,
-                    stop_sequences=["User:", "Jarvis:"]
-                )
-
-                # Extract and display the bot's message
-                response_text = response.generations[0].text.strip()
+            # Get the response from Cohere's generate method
+            response = co.generate(
+                model='command-xlarge',
+                prompt=f"{preamble}\nUser: {prompt}\nJarvis:",
+                max_tokens=2048,  # Increased token limit for better response
+                temperature=0.5,
+                stop_sequences=["User:", "Jarvis:"]
+            )
+            
+            # Extract the bot's message
+            response_text = response.generations[0].text.strip()
+            print(f"Raw Cohere response: {response_text}")
         except Exception as e:
-            response_text = f"Error: {e}"
+            print(f"API error: {e}")
+            return ["general I'm sorry, I couldn't connect to my services right now."]
+        
         ChatHistory.append({"role": "Jarvis", "message": response_text})
-        # Display the response
-        rich_print_function(f"[bold green]Jarvis:[/bold green] {response_text}")
+        
+        # Extract tasks from API response
+        decisions = []
+        
+        # Check for application commands
+        if any(cmd in response_text.lower() for cmd in ["open", "close", "play"]):
+            # This might contain app commands - extract them
+            lines = response_text.replace(",", "\n").split("\n")
+            for line in lines:
+                if any(cmd in line.lower() for cmd in ["open", "close", "play"]):
+                    decisions.append(line.lower().strip())
+        
+        # Check for content generation
+        if "content" in response_text.lower() or any(term in prompt.lower() for term in ["code", "write", "letter", "draft"]):
+            # Look for specific content requests
+            if "java" in prompt.lower() and "code" in prompt.lower():
+                language = "java"
+                if "sort" in prompt.lower():
+                    sort_type = next((word for word in prompt.lower().split() if "sort" in word), "sort")
+                    decisions.append(f"content {language} code for {sort_type}")
+            elif "letter" in prompt.lower() or "draft" in prompt.lower():
+                recipient = ""
+                if "principal" in prompt.lower():
+                    recipient = "to principal"
+                elif "teacher" in prompt.lower():
+                    recipient = "to teacher"
+                
+                if "sick" in prompt.lower() or "leave" in prompt.lower() or "absent" in prompt.lower():
+                    decisions.append(f"content letter {recipient} for sick leave")
+                else:
+                    decisions.append(f"content letter {recipient}")
+            elif "content" in response_text.lower():
+                # Extract content requests from response
+                content_lines = [line for line in response_text.lower().split("\n") if "content" in line]
+                decisions.extend(content_lines)
+        
+        # Check for search requests
+        if "search" in response_text.lower() or "search" in prompt.lower():
+            if "google search" in response_text.lower():
+                search_parts = [line for line in response_text.lower().split("\n") if "google search" in line]
+                decisions.extend(search_parts)
+            elif "google" in prompt.lower() and "search" in prompt.lower():
+                search_query = prompt.lower().split("google")[1] if "google" in prompt.lower() else ""
+                search_query = search_query.replace("search", "").strip()
+                decisions.append(f"google search {search_query}")
+            elif "realtime" in response_text.lower():
+                realtime_parts = [line for line in response_text.lower().split("\n") if "realtime" in line]
+                decisions.extend(realtime_parts)
+        
+        # Check if we should add a general query
+        if not decisions:
+            # Default to general if no clear task type
+            decisions.append(f"general {response_text}")
+        
+        print(f"Processed decisions: {decisions}")
+        return decisions
+        
     except Exception as e:
-        rich_print_function(f"[bold red]Error:[/bold red] {e}")
-    
-
+        print(f"Error in FirstLayerDMM: {e}")
+        return ["general I encountered an error processing your request."]
 
 if __name__ == "__main__":
     while True:

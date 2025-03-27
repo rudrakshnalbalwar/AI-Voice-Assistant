@@ -25,7 +25,7 @@ HtmlCode = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multilingual Speech Recognition</title>
+    <title>Enhanced Speech Recognition</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
         button { margin: 10px; padding: 10px 20px; }
@@ -33,6 +33,7 @@ HtmlCode = '''<!DOCTYPE html>
         .recording { color: red; }
         .language-selector { margin: 10px 0; }
         #detected-language { margin-top: 5px; font-style: italic; }
+        #status-info { font-size: 12px; color: #666; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -43,11 +44,11 @@ HtmlCode = '''<!DOCTYPE html>
             <option value="auto">Auto-detect</option>
             <option value="en-US">English (US)</option>
             <option value="hi-IN">Hindi</option>
-            <option value="mr-IN">Marathi</option>
             <option value="en-IN">English (India)</option>
         </select>
     </div>
     <div id="detected-language">Detected language: -</div>
+    <div id="status-info">Waiting 5 seconds after speech stops before processing</div>
     <button id="start">Start Recognition</button>
     <button id="end">Stop Recognition</button>
     <div id="output"></div>
@@ -57,6 +58,7 @@ HtmlCode = '''<!DOCTYPE html>
             const endButton = document.getElementById('end');
             const output = document.getElementById('output');
             const status = document.getElementById('status');
+            const statusInfo = document.getElementById('status-info');
             const languageSelect = document.getElementById('language-select');
             const detectedLanguage = document.getElementById('detected-language');
             
@@ -64,7 +66,7 @@ HtmlCode = '''<!DOCTYPE html>
             let finalTranscript = '';
             let lastSpeechTime = Date.now();
             let silenceTimer = null;
-            const silenceLimit = 3000; // 3 seconds of silence to trigger completion
+            const silenceLimit = 5000; // 5 seconds of silence to trigger completion
             
             startButton.addEventListener('click', startRecognition);
             endButton.addEventListener('click', stopRecognition);
@@ -122,13 +124,16 @@ HtmlCode = '''<!DOCTYPE html>
                     output.textContent = finalTranscript + interimTranscript;
                     output.scrollTop = output.scrollHeight; // Auto-scroll to bottom
                     
+                    // Update status to show user that we're waiting for silence
+                    statusInfo.textContent = "Waiting 5 seconds after speech stops before processing...";
+                    
                     // Start silence detection timer
                     silenceTimer = setTimeout(function() {
                         if (Date.now() - lastSpeechTime > silenceLimit) {
                             console.log("Silence detected - considering speech complete");
                             status.textContent = 'Processing...';
                             status.className = '';
-                            if (finalTranscript.trim() !== '') {
+                            if (finalTranscript.trim() !== '' || output.textContent.trim() !== '') {
                                 // Only stop if we actually have some text
                                 stopRecognition();
                             } else {
@@ -186,8 +191,18 @@ HtmlCode = '''<!DOCTYPE html>
                     status.textContent = 'Completed';
                     status.className = '';
                     console.log('Recognition stopped');
+                    // Make sure we get either finalTranscript or the current output
+                    if (!finalTranscript && output.textContent) {
+                        finalTranscript = output.textContent;
+                    }
                 }
             }
+            
+            // Function to get the full transcript - called by selenium
+            window.getFullTranscript = function() {
+                stopRecognition();
+                return finalTranscript || output.textContent || '';
+            };
             
             // Allow changing language during session
             languageSelect.addEventListener('change', function() {
@@ -216,8 +231,8 @@ chrome_options.add_argument("--use-fake-device-for-media-stream")
 chrome_options.add_argument("--log-level=3")  # Suppress Chrome logs
 chrome_options.add_argument("--disable-logging")
 chrome_options.add_argument("--silent")
-# Comment out headless for debugging, re-enable it once working
-# chrome_options.add_argument("--headless=new")
+# Using headless mode for production
+chrome_options.add_argument("--headless=new")
 
 # Initialize the chrome webdriver using the ChromeDriverManager
 service = Service(ChromeDriverManager().install())
@@ -356,8 +371,22 @@ def TranslateText(Text):
         return Text  # Return original text if translation fails
 
 # Function to perform speech recognition using the Chrome webdriver
-def SpeechRecognition(timeout=60):  
+def SpeechRecognition(timeout=90):  # Increased timeout for longer inputs
     try:
+        # Avoid using global driver - create new one each time
+        chrome_options = Options()
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+        chrome_options.add_argument(f"user-agent={user_agent}")
+        chrome_options.add_argument("--use-fake-ui-for-media-stream")
+        chrome_options.add_argument("--use-fake-device-for-media-stream")
+        chrome_options.add_argument("--log-level=3")  # Suppress Chrome logs
+        chrome_options.add_argument("--disable-logging")
+        chrome_options.add_argument("--silent")
+        chrome_options.add_argument("--headless=new")
+        
+        # Create a new driver instance for each recognition
+        service = Service(ChromeDriverManager().install())
+        local_driver = webdriver.Chrome(service=service, options=chrome_options)
         # Open the HTML file in the browser
         absolute_path = "file:///" + os.path.abspath(html_path).replace("\\", "/")
         print(f"Opening: {absolute_path}")
@@ -385,14 +414,9 @@ def SpeechRecognition(timeout=60):
         SetAssistantStatus("Listening...")
         
         # Initial wait time
-        max_wait = timeout  # Increased maximum seconds to wait for speech
+        max_wait = timeout  # Maximum seconds to wait for speech
         start_time = time.time()
         last_text = ""
-        stable_count = 0
-        
-        # Try different languages if needed
-        tried_languages = {"auto"}
-        current_lang = "auto"
         
         while time.time() - start_time < max_wait:
             try:
@@ -407,15 +431,9 @@ def SpeechRecognition(timeout=60):
                 )
                 status_text = status_element.text.strip()
                 
-                # Get the detected language info
-                detected_lang_element = WebDriverWait(driver, 1).until(
-                    EC.presence_of_element_located((By.ID, "detected-language"))
-                )
-                detected_lang_text = detected_lang_element.text
-                
                 # If we have text and the status is "Completed", the speech is done
                 if Text and status_text == "Completed":
-                    print(f"Speech completed. Recognized text ({len(Text.split())} words): {Text[:50]}...")
+                    print(f"Speech completed. Recognized text ({len(Text.split())} words): {Text[:100]}...")
                     
                     # Always process with best language detection
                     SetAssistantStatus("Processing...")
@@ -426,78 +444,51 @@ def SpeechRecognition(timeout=60):
                         detected_lang = detect_language(Text)
                         with open(os.path.join(r"C:\Users\Dell\Downloads\AI\jarvis\Data", "last_language.txt"), "w") as f:
                             f.write(detected_lang)
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"Error saving language detection: {e}")
                         
                     return QueryModifier(translated_text)
-                    
-                # If we have text but status is still recording, check if text has been stable
+                
+                # Display interim text for debugging
                 if Text and Text != last_text:
-                    print(f"Interim text ({len(Text.split())} words): {Text[:50]}...")
+                    if len(Text) > 100:
+                        print(f"Interim text ({len(Text.split())} words): {Text[:100]}...")
+                    else:
+                        print(f"Interim text ({len(Text.split())} words): {Text}...")
                     last_text = Text
-                    stable_count = 0
-                    
-                    # Check if we should switch languages based on initial recognition
-                    if len(Text.split()) >= 3 and current_lang == "auto":
-                        detected = detect_language(Text)
-                        if detected == "hi" and "hi-IN" not in tried_languages:
-                            print("Switching to Hindi recognition...")
-                            driver.execute_script("document.getElementById('language-select').value='hi-IN'; const event = new Event('change'); document.getElementById('language-select').dispatchEvent(event);")
-                            tried_languages.add("hi-IN")
-                            current_lang = "hi-IN"
-                            # Reset counts to give the new language time
-                            last_text = ""
-                            stable_count = 0
-                            
-                elif Text and Text == last_text:
-                    stable_count += 1
-                    # If text has been stable for a while and is long enough, consider it complete
-                    if stable_count > 10 and len(Text.split()) > 5:  # If same text for 5 seconds and at least 5 words
-                        print(f"Text stable for 5 seconds, considering complete: {Text[:50]}...")
-                        try:
-                            driver.execute_script("document.getElementById('end').click();")
-                            print("Stopped recognition")
-                        except Exception as e:
-                            print(f"Error stopping recognition: {e}")
-                        
-                        SetAssistantStatus("Processing...")
-                        translated_text = TranslateText(Text)
-                        return QueryModifier(translated_text)
-                    
-                # If no speech detected for a while, try switching languages
-                if time.time() - start_time > 10 and not Text and len(tried_languages) < 3:
-                    if "hi-IN" not in tried_languages:
-                        print("No speech detected with current language, trying Hindi...")
-                        driver.execute_script("document.getElementById('language-select').value='hi-IN'; const event = new Event('change'); document.getElementById('language-select').dispatchEvent(event);")
-                        tried_languages.add("hi-IN")
-                        current_lang = "hi-IN"
-                    elif "en-IN" not in tried_languages:
-                        print("Still no speech detected, trying English (India)...")
-                        driver.execute_script("document.getElementById('language-select').value='en-IN'; const event = new Event('change'); document.getElementById('language-select').dispatchEvent(event);")
-                        tried_languages.add("en-IN")
-                        current_lang = "en-IN"
-                    
+                
+                # Check if enough time has passed with stable text (5+ seconds)
+                # This handles cases where the recognition doesn't properly finish
+                if Text and time.time() - start_time > 20 and Text == last_text:
+                    # Force completion after a long stable period
+                    try:
+                        print("Text stable for a while, getting final transcript...")
+                        final_text = driver.execute_script("return window.getFullTranscript();")
+                        if final_text:
+                            SetAssistantStatus("Processing...")
+                            translated_text = TranslateText(final_text)
+                            return QueryModifier(translated_text)
+                    except Exception as e:
+                        print(f"Error getting transcript: {e}")
+                
             except TimeoutException:
                 pass  # Keep waiting
             
             time.sleep(0.5)  # Short pause between checks
-            
+        
+        # If we reach here, we've timed out. Try to get any text we have
         print("Speech recognition timeout reached")
         
-        # Before giving up, check if we got any text at all
         try:
-            element = WebDriverWait(driver, 1).until(
-                EC.presence_of_element_located((By.ID, "output"))
-            )
-            Text = element.text.strip()
-            
-            if Text:
-                print(f"Got text before timeout: {Text[:50]}...")
+            # Force getting the final transcript
+            final_text = driver.execute_script("return window.getFullTranscript();")
+            if final_text:
+                print(f"Got text before timeout: {final_text[:100]}...")
                 SetAssistantStatus("Processing...")
-                translated_text = TranslateText(Text)
+                translated_text = TranslateText(final_text)
                 return QueryModifier(translated_text)
-        except:
-            pass
+        except Exception as e:
+            print(f"Error getting final transcript: {e}")
             
         SetAssistantStatus("No speech detected")
         return ""
@@ -507,12 +498,12 @@ def SpeechRecognition(timeout=60):
         SetAssistantStatus("Error in speech recognition")
         return ""
 
-# Main Program 
+# Main Program - only runs if this file is executed directly
 if __name__ == "__main__":
     print("Enhanced Multilingual Speech Recognition System Started")
-    print("The system will listen until you pause for 3 seconds")
-    print("Supports English, Hindi, Marathi and mixed language (Hinglish)")
-    print("Say 'stop listening', 'exit', 'band karo' to quit the program")
+    print("The system will listen until you pause for 5 seconds")
+    print("Supports English and Hindi (including Hinglish)")
+    print("Say 'exit', 'bye', or 'band karo' to quit the program")
     try:
         while True:
             Text = SpeechRecognition(timeout=120)  # 2 minutes maximum per input
