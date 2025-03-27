@@ -99,7 +99,7 @@ async def query(payload, headers):
         response = await asyncio.to_thread(requests.post, API_URL, headers=headers, json=payload, timeout=60)
         
         if response.status_code == 200:
-            logger.info("API request successful")
+            # logger.info("API request successful")
             return response.content
         else:
             logger.error(f"API error: Status code {response.status_code} - {response.text}")

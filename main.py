@@ -24,6 +24,9 @@ import threading
 import json
 import os
 
+# Global cache for reading ChatLog.json
+_chatlog_cache = None
+
 env_vars = dotenv_values(r"C:\Users\Dell\Downloads\AI\jarvis\.env")
 Username = env_vars.get("Username")
 Assistantname = env_vars.get("Assistantname")
@@ -289,6 +292,7 @@ def MainExecution():
         SetAssistantStatus("Error occurred")
         TextToSpeech(Answer)
         return True  # Keep mic on even after errors
+    
 def FirstThread():
     while True:
         try:

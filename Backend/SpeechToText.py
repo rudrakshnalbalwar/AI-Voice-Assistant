@@ -475,6 +475,10 @@ def SpeechRecognition(timeout=90):  # Increased timeout for longer inputs
                 pass  # Keep waiting
             
             time.sleep(0.5)  # Short pause between checks
+        try:
+            local_driver.quit()
+        except:
+            pass
         
         # If we reach here, we've timed out. Try to get any text we have
         print("Speech recognition timeout reached")
@@ -491,8 +495,9 @@ def SpeechRecognition(timeout=90):  # Increased timeout for longer inputs
             print(f"Error getting final transcript: {e}")
             
         SetAssistantStatus("No speech detected")
-        return ""
-    
+        return QueryModifier(translated_text)
+
+
     except Exception as e:
         print(f"Speech recognition error: {e}")
         SetAssistantStatus("Error in speech recognition")
