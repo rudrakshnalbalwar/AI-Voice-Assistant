@@ -17,12 +17,13 @@ from Backend.TextToSpeech import TextToSpeech
 from Backend.Automation import Content, GoogleSearch, Automation
 from Backend.ImageGeneration import generate_and_open_images
 from dotenv import dotenv_values
-from asyncio import run
+from asyncio import run, create_task, gather, wait_for
 from time import sleep
 import subprocess
 import threading
 import json
 import os
+import asyncio
 
 # Global cache for reading ChatLog.json
 _chatlog_cache = None
@@ -91,7 +92,62 @@ def InitialExecution():
     ChatLogIntegration()
     ShowChatsOnGUI()
     
+    # Reset the session state when application starts
+    try:
+        from Backend.Chatbot import reset_session
+        reset_session()
+        print("Session reset - Jarvis will introduce itself on first interaction only")
+    except Exception as e:
+        print(f"Error resetting session: {e}")
+    
 InitialExecution()
+
+# Helper function to detect image generation requests
+def is_image_request(query):
+    """Check if the query is requesting image generation"""
+    image_keywords = ["generate image", "create image", "make image", "draw", "picture of", 
+                      "photo of", "image of", "generate a picture", "design", "generate an image"]
+    
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in image_keywords)
+
+# Helper function to extract image prompt
+def extract_image_prompt(query):
+    """Extract the image description from a query"""
+    query_lower = query.lower()
+    
+    # Remove common prefixes
+    for prefix in ["generate image of", "generate image", "create image of", "create image", 
+                   "make an image of", "make an image", "draw a", "generate a picture of", 
+                   "make a picture of", "i want an image of", "can you generate an image of"]:
+        if prefix in query_lower:
+            return query_lower.replace(prefix, "").strip()
+    
+    # If no specific pattern, use the whole query removing "image" words
+    cleaned = query_lower
+    for word in ["image", "generate", "create", "picture", "photo", "draw"]:
+        cleaned = cleaned.replace(word, "").strip()
+    
+    if len(cleaned) > 5:
+        return cleaned
+    
+    # Fallback to whole query
+    return query
+
+# Async wrapper for generate_and_open_images with timeout
+async def generate_image_with_timeout(prompt, timeout=25.0):
+    """Generate image with timeout to prevent hanging"""
+    try:
+        return await wait_for(
+            asyncio.to_thread(generate_and_open_images, prompt), 
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        print(f"Image generation timed out after {timeout} seconds")
+        return False
+    except Exception as e:
+        print(f"Error generating image: {e}")
+        return False
 
 def MainExecution():
     try:
@@ -124,8 +180,16 @@ def MainExecution():
         ShowTextToScreen(f"{Username}: {Query}")
         SetAssistantStatus("Processing...")
         
-        # Get decisions from the model
-        Decisions = FirstLayerDMM(Query)
+        # IMPROVED APPROACH: First check for direct image requests before using the model
+        # This helps with responsiveness for common tasks
+        direct_image_request = is_image_request(Query)
+        if direct_image_request:
+            print("Detected direct image request, bypassing model for faster response")
+            Decisions = ["generate image " + extract_image_prompt(Query)]
+        else:
+            # Get decisions from the model
+            Decisions = FirstLayerDMM(Query)
+        
         print(f"Decision from model: {Decisions}")
         
         if not Decisions or len(Decisions) == 0:
@@ -142,6 +206,12 @@ def MainExecution():
         search_requests = []
         image_requests = []
         general_requests = []
+        
+        # First check original query for image keywords - this improves reliability
+        if is_image_request(Query) and not any(d.startswith(("image", "generate image")) for d in Decisions):
+            print("Forcing image detection based on original query")
+            decision_types.append("image")
+            image_requests.append("image " + extract_image_prompt(Query))
         
         for decision in Decisions:
             decision = decision.lower().strip()
@@ -177,6 +247,7 @@ def MainExecution():
         print(f"Automation commands: {automation_commands}")
         print(f"Content requests: {content_requests}")
         print(f"Search requests: {search_requests}")
+        print(f"Image requests: {image_requests}")
         
         # Prepare a combined answer for multiple tasks
         combined_answers = []
@@ -236,18 +307,41 @@ def MainExecution():
                 part_answer = f"I couldn't complete all the search tasks. Error: {e}"
                 combined_answers.append(part_answer)
         
-        # HANDLE IMAGE GENERATION
+        # HANDLE IMAGE GENERATION - FIXED VERSION WITH PROPER INDENTATION
         if "image" in decision_types and image_requests:
             try:
                 for image_req in image_requests:
                     SetAssistantStatus("Generating image...")
-                    image_query = image_req.replace("image", "").replace("generate", "").strip()
-                    generate_and_open_images(image_query)
-                    part_answer = f"I've generated an image based on: {image_query}"
-                    combined_answers.append(part_answer)
-                    ImageExecution = True
+                    # Better image prompt extraction
+                    image_query = extract_image_prompt(image_req)
+                    
+                    # If image query is empty or too short, use the original query
+                    if not image_query or len(image_query) < 5:
+                        image_query = extract_image_prompt(Query)
+                    
+                    print(f"Generating image with prompt: {image_query}")
+                    
+                    # Run the image generation directly without async
+                    try:
+                        # Call the function directly with debug message
+                        print(f"DEBUG: About to call generate_and_open_images with: {image_query}")
+                        result = generate_and_open_images(image_query)
+                        print(f"DEBUG: Image generation result: {result}")
+                        
+                        if result:
+                            part_answer = f"I've generated images based on: {image_query}"
+                        else:
+                            part_answer = f"I attempted to generate images for '{image_query}' but encountered an issue."
+                        
+                        combined_answers.append(part_answer)
+                        ImageExecution = True
+                    
+                    except Exception as e:
+                        print(f"Error in image generation: {e}")
+                        part_answer = f"I couldn't generate the requested image. Error: {e}"
+                        combined_answers.append(part_answer)
             except Exception as e:
-                print(f"Error in image generation: {e}")
+                print(f"Error in image generation section: {e}")
                 part_answer = f"I couldn't generate the requested image. Error: {e}"
                 combined_answers.append(part_answer)
         
@@ -275,9 +369,9 @@ def MainExecution():
         # Combine all answers into one response
         final_answer = " ".join(combined_answers)
         
-        # Limit answer length if too long
-        if len(final_answer) > 500:
-            final_answer = final_answer[:497] + "..."
+        # Limit answer length if too long for faster TTS
+        if len(final_answer) > 300:
+            final_answer = final_answer[:297] + "..."
             
         ShowTextToScreen(f"{Assistantname}: {final_answer}")
         SetAssistantStatus("Answering...")
@@ -340,5 +434,3 @@ if __name__ == "__main__":
     thread2 = threading.Thread(target=FirstThread, daemon=True)
     thread2.start()
     SecondThread()
-            
-    

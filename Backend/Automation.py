@@ -75,19 +75,45 @@ SystemChatBot = [{"role": "system", "content": f"Hello, I'm {env_vars.get('Usern
 
 # Function to perform Google search
 async def GoogleSearch(Topic):
+    """Perform Google search with improved reliability"""
     try:
         print(f"Searching Google for: {Topic}")
-        await asyncio.to_thread(search, Topic)
-        return True
-    except Exception as e:
-        print(f"Error in Google search: {e}")
+        # First try direct browser open with timeout
         try:
-            url = f"https://www.google.com/search?q={Topic.replace(' ', '+')}"
-            await asyncio.to_thread(webbrowser.open, url)
+            search_query = Topic.replace(' ', '+')
+            url = f"https://www.google.com/search?q={search_query}"
+            print(f"Opening direct search URL: {url}")
+            
+            await asyncio.wait_for(
+                asyncio.to_thread(webbrowser.open, url),
+                timeout=5.0
+            )
             return True
-        except Exception as e2:
-            print(f"Fallback Google search failed: {e2}")
-            return False
+        except (asyncio.TimeoutError, Exception) as e:
+            print(f"Direct Google search failed: {e}, trying alternative method")
+            
+        # If first method fails, try the pywhatkit method with timeout
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(search, Topic),
+                timeout=8.0
+            )
+            return True
+        except (asyncio.TimeoutError, Exception) as e2:
+            print(f"Alternative Google search failed: {e2}")
+            
+            # Last resort - try DuckDuckGo
+            try:
+                ddg_url = f"https://lite.duckduckgo.com/lite/?q={Topic.replace(' ', '+')}"
+                await asyncio.to_thread(webbrowser.open, ddg_url)
+                print(f"Opened DuckDuckGo search as final fallback")
+                return True
+            except Exception as e3:
+                print(f"All search attempts failed: {e3}")
+                return False
+    except Exception as e:
+        print(f"Error in GoogleSearch: {e}")
+        return False
 
 # Function to generate content using AI and save it to a file
 async def Content(Topic):
@@ -206,51 +232,112 @@ async def YouTubeSearch(Topic):
 async def PlayYoutube(query):
     try:
         print(f"Playing on YouTube: {query}")
-        await asyncio.to_thread(playonyt, query)
-        return True
+        # Try with a timeout to prevent hanging
+        try:
+            # First attempt - direct method with timeout
+            await asyncio.wait_for(
+                asyncio.to_thread(playonyt, query),
+                timeout=8.0  # 8 second timeout
+            )
+            print("Successfully played video using playonyt")
+            return True
+        except (asyncio.TimeoutError, Exception) as e:
+            print(f"Direct playonyt timed out or failed: {e}")
+                
+            # Fallback method - open YouTube search directly
+            search_query = query.replace(' ', '+')
+            url = f"https://www.youtube.com/results?search_query={search_query}"
+            await asyncio.to_thread(webbrowser.open, url)
+            print("Opened YouTube search instead")
+            return True
     except Exception as e:
         print(f"Error playing YouTube: {e}")
-        url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
-        await asyncio.to_thread(webbrowser.open, url)
-        print("Opened YouTube search instead")
-        return True
+        # Final fallback
+        try:
+            await asyncio.to_thread(webbrowser.open, "https://www.youtube.com")
+            return True
+        except:
+            return False
 
-# Function to open an application or a relevant webpage
+# Update the OpenApp function with timeouts and better fallbacks
+
+BRAVE_SHORTCUTS = {
+    "facebook": "https://www.facebook.com",
+    "instagram": "https://www.instagram.com",
+    "twitter": "https://twitter.com",
+    "youtube": "https://www.youtube.com",
+    "google": "https://www.google.com",
+    "gmail": "https://mail.google.com"
+}
+
 async def OpenApp(app, sess=requests.session()):
+    """Open an application or website with improved reliability"""
     if not app or app.strip() == "":
         print("Empty app name provided")
         return False
+    
     app = app.strip().lower()
     print(f"Opening: {app}")
-    try:
-        await asyncio.to_thread(appopen, app, match_closest=True, output=True, throw_error=True)
-        print(f"Successfully opened {app} as desktop application")
-        return True
-    except Exception:
-        if app in COMMON_WEBSITES:
-            await asyncio.to_thread(webbrowser.open, COMMON_WEBSITES[app])
+    
+    # Step 1: Try as known website first (fastest)
+    if app in COMMON_WEBSITES:
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(webbrowser.open, COMMON_WEBSITES[app]),
+                timeout=5.0
+            )
             print(f"Opened {app} as known website")
             return True
-        try:
-            url = f"https://www.{app}.com"
-            await asyncio.to_thread(webbrowser.open, url)
-            print(f"Opened direct URL: {url}")
-            return True
-        except:
-            try:
-                html = await asyncio.to_thread(sess.get, f"https://www.google.com/search?q={app}", headers={'User-Agent': useragent})
-                soup = BeautifulSoup(html.text, 'html.parser')
-                links = [link.get('href') for link in soup.find_all('a', {'jsname': 'UWckNb'}) if link.get('href')]
-                if links:
-                    await asyncio.to_thread(webbrowser.open, links[0])
-                    print(f"Opened web link for {app}: {links[0]}")
-                    return True
-                await asyncio.to_thread(webbrowser.open, f"https://www.google.com/search?q={app}")
-                print(f"Opened Google search for {app}")
-                return True
-            except Exception as e:
-                print(f"Error in OpenApp: {e}")
-                return False
+        except (asyncio.TimeoutError, Exception) as e:
+            print(f"Known website opening failed: {e}")
+    
+    # Step 2: Try as desktop app with timeout
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(appopen, app, match_closest=True, output=True, throw_error=True),
+            timeout=5.0  # 5 second timeout
+        )
+        print(f"Successfully opened {app} as desktop application")
+        return True
+    except (asyncio.TimeoutError, Exception) as e:
+        print(f"Desktop app opening failed or timed out: {e}")
+    
+    # Step 3: Try direct .com URL
+    try:
+        url = f"https://www.{app}.com"
+        await asyncio.wait_for(
+            asyncio.to_thread(webbrowser.open, url),
+            timeout=5.0
+        )
+        print(f"Opened direct URL: {url}")
+        return True
+    except (asyncio.TimeoutError, Exception) as e:
+        print(f"Direct URL opening failed: {e}")
+    
+    # Step 4: Try direct .co.in URL for Indian sites
+    try:
+        url = f"https://www.{app}.co.in"
+        await asyncio.wait_for(
+            asyncio.to_thread(webbrowser.open, url),
+            timeout=5.0
+        )
+        print(f"Opened direct Indian URL: {url}")
+        return True
+    except (asyncio.TimeoutError, Exception) as e:
+        print(f"Indian URL opening failed: {e}")
+    
+    # Step 5: Last resort - Google search with timeout
+    try:
+        search_url = f"https://www.google.com/search?q={app}"
+        await asyncio.wait_for(
+            asyncio.to_thread(webbrowser.open, search_url),
+            timeout=5.0
+        )
+        print(f"Opened Google search for {app}")
+        return True
+    except Exception as e:
+        print(f"Error in Google search fallback: {e}")
+        return False
 
 # Function to close an application
 async def CloseApp(app):
@@ -386,6 +473,33 @@ def parse_commands(input_string):
             all_commands.extend(process_command_parts(temp_parts))
             
     return all_commands
+
+# Add a new timeout helper function that can be used throughout the code
+
+async def with_timeout(coroutine, timeout_seconds=10.0, fallback=None):
+    """Execute a coroutine with a timeout and optional fallback"""
+    try:
+        return await asyncio.wait_for(coroutine, timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        print(f"Operation timed out after {timeout_seconds} seconds")
+        if fallback:
+            try:
+                if callable(fallback):
+                    return await fallback()
+                return fallback
+            except Exception as e:
+                print(f"Fallback failed: {e}")
+        return False
+    except Exception as e:
+        print(f"Operation failed: {e}")
+        if fallback:
+            try:
+                if callable(fallback):
+                    return await fallback()
+                return fallback
+            except Exception as e:
+                print(f"Fallback failed: {e}")
+        return False
 
 # Helper function to process individual command parts
 def process_command_parts(parts):

@@ -18,22 +18,68 @@ client = Groq(api_key=GroqAPIKey)
 # Initialize an empty list to store chat messages
 messages = []
 
-# Define a system message that provides context to the AI chatbot about its role and behaviour.
-# Update the System message to include specific instructions about greeting and names:
-System = f"""Hello, I am {Username or 'Rudraksh Nalbalwar'}, You are a very accurate and advanced AI chatbot named {Assistantname or 'Jarvis'} which also has real-time up-to-date information from the internet.
+# Track if this is the first interaction in the session
+session_file = os.path.join(r"C:\Users\Dell\Downloads\AI\jarvis\Data", "session_state.json")
+
+# Function to check if this is the first interaction
+def is_first_interaction():
+    try:
+        if os.path.exists(session_file):
+            with open(session_file, 'r') as f:
+                data = load(f)
+                return data.get('first_interaction', True)
+        return True
+    except Exception as e:
+        print(f"Error reading session state: {e}")
+        return True
+
+# Function to update the interaction state
+def update_interaction_state(is_first=False):
+    try:
+        os.makedirs(os.path.dirname(session_file), exist_ok=True)
+        with open(session_file, 'w') as f:
+            dump({'first_interaction': is_first}, f)
+    except Exception as e:
+        print(f"Error updating session state: {e}")
+
+# Function to reset the session state
+def reset_session():
+    update_interaction_state(True)
+    print("Session reset - Jarvis will introduce itself on first interaction")
+
+# Get appropriate system message based on interaction state
+def get_system_message():
+    if is_first_interaction():
+        # First interaction - include greeting
+        return f"""Hello, I am {Username or 'Rudraksh Nalbalwar'}, You are a very accurate and advanced AI chatbot named {Assistantname or 'Jarvis'} which also has real-time up-to-date information from the internet.
+*** IMPORTANT: For this first interaction, start your response with "Hello {Username or 'Rudraksh Nalbalwar'}! I'm {Assistantname or 'Jarvis'}." ***
 *** Do not tell time until I ask, do not talk too much, just answer the question.***
 *** Reply in only English, even if the question is in Hindi, reply in English.***
 *** Do not provide notes in the output, just answer the question and never mention your training data. ***
-*** IMPORTANT: When I say "Hi" or "Hello", you must respond with "Hello {Username or 'Rudraksh Nalbalwar'} and answer whatever I ask ***
 *** IMPORTANT: Always address yourself as {Assistantname or 'Jarvis'} ***
 *** IMPORTANT: Always provide accurate and relevant information. ***
-*** IMPORTANT: Always provide information that is up-to-date and relevant to the user's query. ***
+*** IMPORTANT: If user asks to open a website and perform some task open it through Brave browser and Provide accurate information ***
 """
+    else:
+        # Subsequent interactions - skip the greeting
+        return f"""Hello, I am {Username or 'Rudraksh Nalbalwar'}, You are a very accurate and advanced AI chatbot named {Assistantname or 'Jarvis'} which also has real-time up-to-date information from the internet.
+*** IMPORTANT: DO NOT introduce yourself or use any greeting with my name. Start directly with your answer. ***
+*** Do not tell time until I ask, do not talk too much, just answer the question.***
+*** Reply in only English, even if the question is in Hindi, reply in English.***
+*** Do not provide notes in the output, just answer the question and never mention your training data. ***
+*** IMPORTANT: Always address yourself as {Assistantname or 'Jarvis'} ***
+*** IMPORTANT: Always provide accurate and relevant information. ***
+*** IMPORTANT: If user asks to open a website and perform some task open it through Brave browser and Provide accurate information ***
+"""
+
+# Define a system message that provides context to the AI chatbot about its role and behaviour.
+System = get_system_message()
 
 # A list of system instructions for the chatbot.
 SystemChatBot = [
     {"role": "system", "content": System}
 ]
+
 data_dir = r"C:\Users\Dell\Downloads\AI\jarvis\Data"
 chatlog_path = os.path.join(data_dir, "ChatLog.json")
 # Attempt to load the chat log from a JSON file
@@ -61,7 +107,7 @@ def RealtimeInformation():
     data += f"Day: {day}\nDate: {date}\nMonth: {month}\nYear: {year}\n"
     data += f"Time: {hour} hours :{minute} minutes :{second} seconds.\n"
     return data
-
+        
 # function to modify the chatbot's response for better formatting.
 def AnswerModifier(Answer):
     lines = Answer.split('\n')    # split the response into lines
@@ -74,9 +120,20 @@ def ChatBot(Query):
     """ This function sends the user's query to the chatbot and returns the AI's response. """
     
     try:
+        # Check if this is the first interaction
+        first_interaction = is_first_interaction()
+        
+        # Get the appropriate system message
+        System = get_system_message()
+        SystemChatBot = [{"role": "system", "content": System}]
+        
         # load the existing chat log from the JSON file.
         with open(chatlog_path, "r") as f:
             messages = load(f)
+            
+        # OPTIMIZATION: Limit chat history to last 10 messages to reduce context length
+        if len(messages) > 10:
+            messages = messages[-10:]
             
         # Append the user's query to the message list.
         messages.append({"role": "user", "content": f"{Query}"})
@@ -101,6 +158,11 @@ def ChatBot(Query):
                 
         Answer = Answer.replace("</s>", "")   # clean up any unwanted tokens from the response.
         
+        # Update the session state after first interaction
+        if first_interaction:
+            update_interaction_state(False)
+            print("First interaction complete, updating session state")
+        
         # Append the chatbot's response to the message list.
         messages.append({"role": "assistant", "content": Answer})
         
@@ -110,15 +172,19 @@ def ChatBot(Query):
             
         # Return the chatbot's response after modifying it for better formatting.
         return AnswerModifier(Answer=Answer)
+    
     except Exception as e:
-        # Hanlde errors by printing the exceptiona and resetting the chat log.
+        # Handle errors by printing the exception and resetting the chat log.
         print(f"An error occurred: {e}")
         with open(chatlog_path, "w") as f:
             dump([], f, indent=4)
         return ChatBot(Query)   # Retry the chatbot function if an error occurs.
-    
+
 # Main Program 
 if __name__ == "__main__":
+    # Reset session at startup when running directly
+    reset_session()
+    
     while True:
         user_input = input("Enter your question: ")
         # Check if user wants to exit
