@@ -229,32 +229,69 @@ async def YouTubeSearch(Topic):
         return False
 
 # Function to play a video on YouTube
+# Function to play a video on YouTube with better reliability
 async def PlayYoutube(query):
     try:
         print(f"Playing on YouTube: {query}")
-        # Try with a timeout to prevent hanging
+        search_query = query.replace(' ', '+')
+        
+        # Method 1: Direct YouTube redirect approach
         try:
-            # First attempt - direct method with timeout
-            await asyncio.wait_for(
-                asyncio.to_thread(playonyt, query),
-                timeout=8.0  # 8 second timeout
-            )
-            print("Successfully played video using playonyt")
+            url = f"https://www.youtube.com/search?q={search_query}"
+            subprocess.Popen(["start", url], shell=True)
+            print(f"Opened direct YouTube search URL: {url}")
+            
+            # Give time for the browser to load
+            await asyncio.sleep(1.5)
+            
+            # Simulate Tab and Enter to click on first video
+            import pyautogui
+            try:
+                # Tab to the first video result and press enter
+                pyautogui.press('tab', presses=4, interval=0.1)
+                pyautogui.press('enter')
+                print("Attempted to navigate to first video with keyboard")
+            except Exception as kb_error:
+                print(f"Keyboard navigation error: {kb_error}")
+            
             return True
-        except (asyncio.TimeoutError, Exception) as e:
-            print(f"Direct playonyt timed out or failed: {e}")
+        except Exception as e1:
+            print(f"Method 1 failed: {e1}")
+            
+            # Method 2: Try with Chrome directly 
+            try:
+                # Attempt to open with Chrome for better compatibility
+                chrome_path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+                if os.path.exists(chrome_path):
+                    subprocess.Popen([chrome_path, f"https://www.youtube.com/results?search_query={search_query}"], 
+                                     shell=True)
+                    print("Opened YouTube search in Chrome")
+                    return True
+                else:
+                    print("Chrome not found at expected path")
+                    raise Exception("Chrome not found")
+            except Exception as e2:
+                print(f"Method 2 failed: {e2}")
                 
-            # Fallback method - open YouTube search directly
-            search_query = query.replace(' ', '+')
-            url = f"https://www.youtube.com/results?search_query={search_query}"
-            await asyncio.to_thread(webbrowser.open, url)
-            print("Opened YouTube search instead")
-            return True
+                # Method 3: Fall back to pywhatkit
+                try:
+                    # Use pywhatkit with a longer timeout
+                    print(f"Attempting playonyt with query: {query}")
+                    await asyncio.to_thread(playonyt, query)
+                    print("Successfully used playonyt method")
+                    return True
+                except Exception as e3:
+                    print(f"Method 3 failed: {e3}")
+                    
+                    # Final fallback - just open YouTube
+                    webbrowser.open(f"https://www.youtube.com/results?search_query={search_query}")
+                    print("Opened basic YouTube search as last resort")
+                    return True
     except Exception as e:
-        print(f"Error playing YouTube: {e}")
-        # Final fallback
+        print(f"Critical error in PlayYoutube: {e}")
         try:
-            await asyncio.to_thread(webbrowser.open, "https://www.youtube.com")
+            # Emergency fallback
+            webbrowser.open("https://www.youtube.com")
             return True
         except:
             return False

@@ -180,8 +180,13 @@ def MainExecution():
         ShowTextToScreen(f"{Username}: {Query}")
         SetAssistantStatus("Processing...")
         
+        # Pre-process multi-task requests into separate commands
+        if "and" in Query.lower() and any(keyword in Query.lower() for keyword in 
+                                          ["play", "search", "open", "close", "get", "stock", "price", "generate", "image"]):
+            print(f"Pre-processed multi-task request into: [{Query.lower()}]")
+            # We're keeping the original query but will do specialized parsing
+
         # IMPROVED APPROACH: First check for direct image requests before using the model
-        # This helps with responsiveness for common tasks
         direct_image_request = is_image_request(Query)
         if direct_image_request:
             print("Detected direct image request, bypassing model for faster response")
@@ -189,6 +194,29 @@ def MainExecution():
         else:
             # Get decisions from the model
             Decisions = FirstLayerDMM(Query)
+            
+            # Direct command detection for better reliability
+            if "play" in Query.lower() and not any("play" in d.lower() for d in Decisions):
+                parts = Query.lower().split("play", 1)
+                if len(parts) > 1 and parts[1].strip():
+                    print("Adding missing play command based on query")
+                    Decisions.append(f"play {parts[1].strip()}")
+                    
+            # Direct stock price detection
+            if ("stock" in Query.lower() or "price of" in Query.lower()) and not any("realtime" in d.lower() for d in Decisions):
+                print("Adding missing stock price search based on query")
+                Decisions.append(f"realtime {Query}")
+                
+            # Direct search detection
+            if any(term in Query.lower() for term in ["search for", "look up", "find"]) and not any(("search" in d.lower() or "realtime" in d.lower()) for d in Decisions):
+                search_query = Query.lower()
+                for term in ["search for", "look up", "find"]:
+                    if term in search_query:
+                        search_query = search_query.split(term, 1)[1].strip()
+                        break
+                if search_query:
+                    print(f"Adding missing search command based on query: {search_query}")
+                    Decisions.append(f"google search {search_query}")
         
         print(f"Decision from model: {Decisions}")
         
@@ -212,6 +240,14 @@ def MainExecution():
             print("Forcing image detection based on original query")
             decision_types.append("image")
             image_requests.append("image " + extract_image_prompt(Query))
+        
+        # Check for direct YouTube/play command in the original query
+        if "play" in Query.lower() and not any(d.startswith("play") for d in Decisions):
+            print("Detected direct play command in query")
+            play_content = Query.lower().split("play", 1)[1].strip()
+            if play_content:
+                decision_types.append("automation")
+                automation_commands.append(f"play {play_content}")
         
         for decision in Decisions:
             decision = decision.lower().strip()
@@ -257,9 +293,44 @@ def MainExecution():
         if "automation" in decision_types and automation_commands:
             try:
                 SetAssistantStatus("Performing tasks...")
-                result = run(Automation(automation_commands))
-                part_answer = f"I've executed the following tasks: {', '.join(automation_commands)}"
-                combined_answers.append(part_answer)
+                
+                # Special handling for YouTube play commands
+                youtube_play_commands = [cmd for cmd in automation_commands if cmd.startswith("play")]
+                other_commands = [cmd for cmd in automation_commands if not cmd.startswith("play")]
+                
+                # Process YouTube commands with special attention
+                if youtube_play_commands:
+                    for yt_cmd in youtube_play_commands:
+                        yt_query = yt_cmd.replace("play", "").strip()
+                        SetAssistantStatus(f"Playing {yt_query} on YouTube...")
+                        
+                        # Import the YouTube function properly
+                        from Backend.Automation import PlayYoutube
+                        
+                        # Try up to 2 times for YouTube playback
+                        success = False
+                        for attempt in range(2):
+                            try:
+                                success = asyncio.run(PlayYoutube(yt_query))
+                                if success:
+                                    print(f"Successfully played YouTube on attempt {attempt+1}")
+                                    break
+                                time.sleep(1)  # Small delay between attempts
+                            except Exception as yt_e:
+                                print(f"YouTube attempt {attempt+1} failed: {yt_e}")
+                                time.sleep(1)  # Brief pause before retry
+                        
+                        if success:
+                            combined_answers.append(f"I'm playing {yt_query} on YouTube.")
+                        else:
+                            combined_answers.append(f"I had trouble playing {yt_query} on YouTube, but I've opened the search results.")
+                
+                # Process other automation commands normally
+                if other_commands:
+                    result = asyncio.run(Automation(other_commands))
+                    part_answer = f"I've executed the following tasks: {', '.join(other_commands)}"
+                    combined_answers.append(part_answer)
+                
                 TaskExecution = True
             except Exception as e:
                 print(f"Error in automation: {e}")
@@ -272,7 +343,7 @@ def MainExecution():
                 for content_req in content_requests:
                     SetAssistantStatus("Generating content...")
                     content_query = content_req.replace("content", "").strip()
-                    run(Content(content_query))
+                    asyncio.run(Content(content_query))
                     part_answer = f"I've created content for: {content_query}"
                     combined_answers.append(part_answer)
                     ContentExecution = True
@@ -286,19 +357,44 @@ def MainExecution():
             try:
                 for search_req in search_requests:
                     if search_req.startswith("realtime"):
-                        SetAssistantStatus("Searching...")
+                        SetAssistantStatus("Getting real-time information...")
                         search_query = search_req.replace("realtime", "").strip()
                         if not search_query:
                             search_query = Query
+                            
+                        # Special handling for stock price queries
+                        if any(term in search_query.lower() for term in ["stock", "price", "share", "market"]):
+                            # Extract company name for stock query
+                            company_name = None
+                            company_keywords = ["apple", "microsoft", "google", "amazon", "tesla", "facebook", "meta"]
+                            for company in company_keywords:
+                                if company in search_query.lower():
+                                    company_name = company
+                                    break
+                            
+                            # If we found a company name, use it directly
+                            if company_name:
+                                SetAssistantStatus(f"Getting stock price for {company_name}...")
+                                try:
+                                    # Import directly from RealTimeSearchEngine
+                                    from Backend.RealTimeSearchEngine import get_stock_price
+                                    stock_result = get_stock_price(company_name)
+                                    if stock_result:
+                                        combined_answers.append(stock_result)
+                                        continue
+                                except Exception as stock_e:
+                                    print(f"Error getting stock price: {stock_e}")
+                        
+                        # Regular realtime search
                         search_result = RealtimeSearchEngine(QueryModifier(search_query))
-                        part_answer = f"Search result: {search_result[:100]}..."
+                        part_answer = f"{search_result}"
                         combined_answers.append(part_answer)
                     elif search_req.startswith("google search"):
                         SetAssistantStatus("Searching Google...")
                         search_query = search_req.replace("google search", "").strip()
                         if not search_query:
                             search_query = Query
-                        run(GoogleSearch(search_query))
+                        asyncio.run(GoogleSearch(search_query))
                         part_answer = f"I've searched Google for: {search_query}"
                         combined_answers.append(part_answer)
                     SearchExecution = True
@@ -321,7 +417,7 @@ def MainExecution():
                     
                     print(f"Generating image with prompt: {image_query}")
                     
-                    # Run the image generation directly without async
+                    # Run the image generation directly with proper error handling
                     try:
                         # Call the function directly with debug message
                         print(f"DEBUG: About to call generate_and_open_images with: {image_query}")
@@ -346,25 +442,24 @@ def MainExecution():
                 combined_answers.append(part_answer)
         
         # GENERAL QUERY HANDLING (CHATBOT) if no other tasks were executed
-        if "general" in decision_types and not any([TaskExecution, ContentExecution, SearchExecution, ImageExecution]):
+        if ("general" in decision_types or not any([TaskExecution, ContentExecution, SearchExecution, ImageExecution])):
             try:
                 SetAssistantStatus("Thinking...")
-                for general_req in general_requests:
-                    query_text = general_req.replace("general", "").strip()
-                    if not query_text:
-                        query_text = Query
-                    Answer = ChatBot(QueryModifier(query_text))
+                if general_requests:
+                    for general_req in general_requests:
+                        query_text = general_req.replace("general", "").strip()
+                        if not query_text:
+                            query_text = Query
+                        Answer = ChatBot(QueryModifier(query_text))
+                        combined_answers.append(Answer)
+                else:
+                    # If no tasks were executed or recognized, treat as general query
+                    Answer = ChatBot(QueryModifier(Query))
                     combined_answers.append(Answer)
             except Exception as e:
                 print(f"Error in chatbot: {e}")
                 part_answer = f"I couldn't process your question. Error: {e}"
                 combined_answers.append(part_answer)
-        
-        # If no tasks or only failed tasks, handle as general query
-        if not combined_answers:
-            SetAssistantStatus("Thinking...")
-            Answer = ChatBot(QueryModifier(Query))
-            combined_answers.append(Answer)
         
         # Combine all answers into one response
         final_answer = " ".join(combined_answers)

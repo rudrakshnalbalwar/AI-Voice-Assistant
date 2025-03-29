@@ -3,6 +3,7 @@ from random import randint
 from PIL import Image
 import requests
 import os
+import time
 from time import sleep
 import sys
 import logging
@@ -160,25 +161,73 @@ async def generate_images(prompt: str, api_key: str):
         update_status("Failed to generate any images")
         return False
 
-# Wrapper function to generate and open images
+# Replace the generate_and_open_images function with this improved version
 def generate_and_open_images(prompt: str):
+    """Improved wrapper function that handles errors better"""
+    if not prompt or len(prompt.strip()) < 3:
+        print("Error: Image prompt too short")
+        return False
+        
+    # Log the request
+    print(f"Image generation requested for prompt: '{prompt}'")
+    
+    # Get API key with better error handling
     api_key = get_api_key()
     if not api_key:
+        print("Error: No API key found for image generation")
         update_status("Error: API key not found")
         return False
     
     try:
+        # Write the prompt to the data file
+        os.makedirs(os.path.dirname(IMAGE_DATA_PATH), exist_ok=True)
+        with open(IMAGE_DATA_PATH, "w") as f:
+            f.write(f"{prompt},True")
+        
+        # Update status
+        update_status(f"Generating image for: {prompt}")
+        
+        # Set a timeout for the operation
+        start_time = time.time()
+        timeout = 60  # 60 seconds timeout
+        
+        # Start async image generation
         success = asyncio.run(generate_images(prompt, api_key))
+        
         if success:
-            # Add a delay to ensure files are fully written
-            sleep(2)
-            open_images(prompt)
-        return success
+            # Wait a moment for files to be fully written
+            time.sleep(1)
+            
+            # Try to open the images
+            safe_prompt = prompt.replace(' ', '_').replace('/', '_').replace('\\', '_')
+            
+            # Check if images were actually generated
+            expected_images = [os.path.join(DATA_DIR, f"{safe_prompt}{i+1}.jpg") for i in range(4)]
+            images_exist = [os.path.exists(img) for img in expected_images]
+            
+            if any(images_exist):
+                print(f"Opening {sum(images_exist)} generated images")
+                open_images(prompt)
+                return True
+            else:
+                print("Image generation reported success but no images found")
+                return False
+        else:
+            print("Image generation failed")
+            return False
+            
     except Exception as e:
         logger.error(f"Error in generate_and_open_images: {e}")
         update_status(f"Error: {str(e)}")
+        
+        # Try to reset the status
+        try:
+            with open(IMAGE_DATA_PATH, "w") as f:
+                f.write("False,False")
+        except Exception:
+            pass
+            
         return False
-
 # Main loop to monitor for image generation requests
 def main():
     logger.info("Image generation service started...")
