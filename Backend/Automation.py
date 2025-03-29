@@ -807,7 +807,7 @@ if __name__ == "__main__":
                     continue
                 commands = parse_commands(user_input)
                 print(f"Parsed {len(commands)} commands: {commands}")
-                asyncio.run(Automation(commands))
+                asyncio.run(TranslateAndExecute(commands))
             except KeyboardInterrupt:
                 print("\nProgram interrupted")
                 break

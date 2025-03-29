@@ -161,7 +161,7 @@ def ChatBot(Query):
         # Update the session state after first interaction
         if first_interaction:
             update_interaction_state(False)
-            print("First interaction complete, updating session state")
+            # print("First interaction complete, updating session state")
         
         # Append the chatbot's response to the message list.
         messages.append({"role": "assistant", "content": Answer})

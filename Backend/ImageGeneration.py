@@ -161,7 +161,6 @@ async def generate_images(prompt: str, api_key: str):
         update_status("Failed to generate any images")
         return False
 
-# Replace the generate_and_open_images function with this improved version
 def generate_and_open_images(prompt: str):
     """Improved wrapper function that handles errors better"""
     if not prompt or len(prompt.strip()) < 3:

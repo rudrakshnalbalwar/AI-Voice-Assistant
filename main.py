@@ -24,6 +24,7 @@ import threading
 import json
 import os
 import asyncio
+import time
 
 # Global cache for reading ChatLog.json
 _chatlog_cache = None
@@ -307,6 +308,19 @@ def MainExecution():
                         # Import the YouTube function properly
                         from Backend.Automation import PlayYoutube
                         
+                        try: 
+                            # Run the YouTube function directly with debug message
+                            sucess = asyncio.run(asyncio.wait_for(PlayYoutube(yt_query), timeout = 5.0))
+                            if success:
+                                combined_answers.append(f"I'm playing {yt_query} on YouTube.")
+                            else:
+                                combined_answers.append(f"I had trouble playing {yt_query} on YouTube, but I've opened the search results.")
+                        except asyncio.TimeoutError:
+                            print("YouTube playback timeout - continuing with search results")
+                            combined_answers.append(f"I'm searching for {yt_query} on YouTube.")
+                        except Exception as yt_e:
+                            print(f"YouTube error: {yt_e}")
+                            combined_answers.append(f"I had trouble playing {yt_query}, but I've opened YouTube.")
                         # Try up to 2 times for YouTube playback
                         success = False
                         for attempt in range(2):
@@ -320,11 +334,7 @@ def MainExecution():
                                 print(f"YouTube attempt {attempt+1} failed: {yt_e}")
                                 time.sleep(1)  # Brief pause before retry
                         
-                        if success:
-                            combined_answers.append(f"I'm playing {yt_query} on YouTube.")
-                        else:
-                            combined_answers.append(f"I had trouble playing {yt_query} on YouTube, but I've opened the search results.")
-                
+
                 # Process other automation commands normally
                 if other_commands:
                     result = asyncio.run(Automation(other_commands))
